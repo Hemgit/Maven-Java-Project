@@ -1,7 +1,7 @@
 [build]
-172.31.37.203
+172.31.28.58
 
 
 [sonar]
-172.31.47.68 ansible_user=ec2-user ansible_ssh_private_key_file=/home/devops/.ssh/id_rsa
+172.31.26.55
 
