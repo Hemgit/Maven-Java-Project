@@ -1,6 +1,6 @@
 --- # Upload the Shell Script to Remote Host and Run it.
 -  hosts: sonar
-   remote_user: centos
+   remote_user: devops
    become: yes
    become_method: sudo
    connection: ssh
