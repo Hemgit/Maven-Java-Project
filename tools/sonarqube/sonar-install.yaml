@@ -3,7 +3,7 @@
    remote_user: devops
    become: yes
    become_method: sudo
-   connection: ssh
+   connection: local
    gather_facts: yes    
    vars:
       java_packages:
