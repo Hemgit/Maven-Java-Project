@@ -1,0 +1,59 @@
+
+pipeline {
+  agent { label 'buildserver' }
+
+  tools {
+    maven 'M3'
+    jdk 'java1.8'       // default JDK for all stages
+    // ansible 'ansible' // keep only if you're using it in steps
+  }
+
+  stages {
+
+    stage('pull_from_repo') {
+      steps {
+        git branch: 'main', credentialsId: 'poonam', url: 'https://gitlab.com/hemanthgitlab/student-app'
+      }
+    }
+
+    stage('sonarqube analysis') {
+      steps {
+        echo 'Sonar Scanner'
+        // Build classes so analysis has binaries
+        sh 'mvn -B clean compile'
+
+        // IMPORTANT: Use the exact server Name from Jenkins > Configure System > SonarQube servers
+        withSonarQubeEnv('sonar') {
+          // Use fully-qualified plugin coordinates so Maven resolves the Sonar plugin
+          sh 'mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
+        }
+      }
+    }
+
+    
+    stage('unit_test') {
+      steps {
+        // If you need Java 8 specifically here, you can switch tools inside the stage:
+        // tools { jdk 'java1.8' }
+        sh 'java -version'      // should print 1.8
+        sh 'mvn -B clean test'
+      }
+      post {
+        success {
+          junit 'target/surefire-reports/*.xml'
+        }
+      }
+    }
+
+    stage('packaging') {
+      steps {
+        sh 'mvn -B clean package -DskipTests'
+      }
+      post {
+        success {
+          archiveArtifacts artifacts: 'target/*.war', fingerprint: true
+        }
+      }
+    }
+  }
+}
