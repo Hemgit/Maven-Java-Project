@@ -1,115 +1,120 @@
 
 pipeline {
-    agent { label 'buildserver'}
-    
+  agent { label 'buildserver' }
 
-    tools {
-        // Install the Maven version configured as "M3" and add it to the path.
-        maven "M3"
-        jdk 'java1.8'
+  tools {
+    maven 'M3'
+    jdk 'java1.8'
+  }
+
+  stages {
+    stage('Prepare-Workspace') {
+      steps {
+        git branch: 'master',
+            credentialsId: 'a6d19976-1ac0-4b35-97a9-9620430929b5',
+            url: 'https://github.com/Hemgit/Maven-Java-Project.git'
+        stash name: 'Source'
+      }
     }
 
-    stages {
-        stage('Prepare-Workspace') {
-            steps {
-                // Get some code from a GitHub repository
-                git branch: 'master', credentialsId: 'a6d19976-1ac0-4b35-97a9-9620430929b5', url: 'https://github.com/Hemgit/Maven-Java-Project.git'
-		stash 'Source'
-            }
-            
+    stage('Build') {
+      steps {
+        sh 'mvn clean compile'
+      }
+    }
+
+    stage('Unit Test Cases') {
+      tools { jdk 'java1.8' }
+      steps {
+        echo 'Clean and Test'
+        sh 'mvn clean test'
+      }
+      post {
+        success {
+          echo 'Publishing JUnit'
+          junit 'target/surefire-reports/*.xml'
         }
-     stage('build'){
-         steps{
-             sh 'mvn clean compile '
-         }
-     }
-      stage('Unit Test Cases') {
-         tools {
-                 jdk 'java1.8'
-             }
-          steps{
-            
-
-	       echo "Clean and Test"
-              sh "mvn clean test"  
-          }
-          post{
-              success{
-		      echo "Clean and Test"
-                  junit 'target/surefire-reports/*.xml'
-              }
-          }
       }
-	    
-      stage('Build Code') {
-        
-          steps{
-	      unstash 'Source'
-              sh "mvn clean package  -DskipTests"  
-          }
-          post{
-              success{
-                  archiveArtifacts '**/*.war'
-              }
-          }
+    }
+
+    stage('Build Code') {
+      steps {
+        unstash 'Source'
+        sh 'mvn clean package -DskipTests'
       }
-	    
-     
-stage('Remote Docker Build') {
-  steps {
-    // SSH key to the remote EC2 server
-    sshagent(credentials: ['docker1']) {
-      sh '''
-        set -e
-        REMOTE_HOST=devops@172.31.17.229
-        REMOTE_DIR=/home/devops/webapp1
+      post {
+        success {
+          archiveArtifacts '**/*.war'
+        }
+      }
+    }
 
-        # Prepare remote build context
-         
-        ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "mkdir -p $REMOTE_DIR"
-        
- 
+    stage('Remote Docker Build') {
+      steps {
+        sshagent(credentials: ['docker1']) {
+          sh '''
+            set -e
+            REMOTE_HOST=devops@172.31.17.229
+            REMOTE_DIR=/home/devops/webapp1
+            IMAGE=hemgit/tomcat
+            TAG=v1
 
-        
-        scp -o StrictHostKeyChecking=no target/*.war "$REMOTE_HOST:$REMOTE_DIR/"
-        ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "mv -f $REMOTE_DIR/java-maven-1.0-SNAPSHOT.war $REMOTE_DIR/student.war"
-        scp -o StrictHostKeyChecking=no Dockerfile "$REMOTE_HOST:$REMOTE_DIR/"
-        
-        
-        ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "cd $REMOTE_DIR && docker build -t hemgit/tomcat ."
+            # Prepare remote build context
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "mkdir -p $REMOTE_DIR"
 
-      '''
-      
+            # Copy WAR + Dockerfile into remote context
+            scp -o StrictHostKeyChecking=no target/*.war "$REMOTE_HOST:$REMOTE_DIR/java-maven-1.0-SNAPSHOT.war"
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "mv -f $REMOTE_DIR/java-maven-1.0-SNAPSHOT.war $REMOTE_DIR/student.war"
+            scp -o StrictHostKeyChecking=no Dockerfile "$REMOTE_HOST:$REMOTE_DIR/"
+
+            # Build WITH TAG on remote host
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "cd $REMOTE_DIR && docker build -t $IMAGE:$TAG ."
+
+            # Sanity: show image
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "docker images | grep $IMAGE"
+          '''
+        }
+      }
+    }
+
+    stage('Remote Docker Push') {
+      steps {
+        // Use the creds securely; Jenkins will mask them in logs
+        withCredentials([usernamePassword(credentialsId: 'dockerhub',
+                                         usernameVariable: 'DOCKER_USER',
+                                         passwordVariable: 'DOCKER_PASSWORD')]) {
+          sshagent(credentials: ['docker1']) {
+            sh '''
+              set -e
+              REMOTE_HOST=devops@172.31.17.229
+              IMAGE=hemgit/tomcat
+              TAG=v1
+
+              # Login securely on the remote host and push
+              ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "echo \\"$DOCKER_PASSWORD\\" | docker login -u \\"$DOCKER_USER\\" --password-stdin"
+              ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "docker push $IMAGE:$TAG"
+              ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "docker logout || true"
+            '''
+          }
+        }
+      }
+    }
+
+    stage('Integration-Test') {
+      steps {
+        echo 'Run Integration Test Cases'
+        unstash 'Source'
+        sh 'mvn clean verify'
+      }
+    }
+
+    stage('approve') {
+      steps {
+        echo 'Approval State'
+        timeout(time: 7, unit: 'DAYS') {
+          input message: 'Do you want to deploy?', submitter: 'admin'
+        }
       }
     }
   }
-
-
-             
-                  
-        
-     
-	 
-     
-	    
-     stage ('Integration-Test') {
-	
-	steps {
-             echo "Run Integration Test Cases"
-             unstash 'Source'
-            sh "mvn clean verify"
-        }
-    }
-	    
-    stage ('approve') {
-	steps {
-		echo "Approval State"
-                timeout(time: 7, unit: 'DAYS') {                    
-			input message: 'Do you want to deploy?', submitter: 'admin'
-		}
-	}
-     }
-	 
-
-    }
 }
