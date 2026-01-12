@@ -54,7 +54,7 @@ WORKDIR /opt/tomcat/webapps
 # If you expect exactly one WAR in the build context:
 #COPY *.war /opt/tomcat/webapps/
 # Or a specific one:
- COPY ~/webapp1/student.war /opt/tomcat/webapps/
+ COPY /home/devops/webapp1/student.war /opt/tomcat/webapps/
 
 EXPOSE 8080
 ENTRYPOINT ["/opt/tomcat/bin/catalina.sh", "run"]
