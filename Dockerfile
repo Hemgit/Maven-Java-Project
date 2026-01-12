@@ -25,11 +25,7 @@ RUN curl -fSL https://dlcdn.apache.org/tomcat/tomcat-8/v8.5.83/bin/apache-tomcat
     mv apache-tomcat-8.5.83 tomcat && \
     rm -f apache-tomcat.tar.gz
 
-# Copy README for reference
-COPY README.md /opt/
 
-# Example environment variable
-ENV test="testing the test variable"
 
 # Move into Tomcat webapps and deploy WAR
 WORKDIR /opt/tomcat/webapps
@@ -40,8 +36,7 @@ COPY target/*.war /opt/tomcat/webapps/webapp.war
 # Expose Tomcat port
 EXPOSE 8080
 
-# Simple CMD (like your original)
-CMD echo "hell this is cmd statement"
+
 
 # Entrypoint to run Tomcat
 ENTRYPOINT ["/opt/tomcat/bin/catalina.sh", "run"]
