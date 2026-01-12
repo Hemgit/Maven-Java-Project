@@ -34,9 +34,8 @@ USER tomcat
 # Copy your WAR: either as a named app or ROOT (for /)
 WORKDIR /opt/tomcat/webapps
 # Copy to a named context:
-# COPY build/webapp.war /opt/tomcat/webapps/webapp.war
-# Or deploy as ROOT (app at /):
-COPY build/ROOT.war /opt/tomcat/webapps/ROOT.war
+ COPY build/webapp.war /opt/tomcat/webapps/webapp.war
+
 
 EXPOSE 8080
 ENTRYPOINT ["/opt/tomcat/bin/catalina.sh", "run"]
