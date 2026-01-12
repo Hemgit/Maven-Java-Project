@@ -10,11 +10,6 @@ RUN sed -i \
   -e 's|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=http://vault.centos.org/7.9.2009|g' \
   /etc/yum.repos.d/CentOS-Base.repo || true
 
-# Clean, update, and install required packages
-RUN yum clean all && yum makecache && \
-    yum -y update && \
-    yum -y install wget curl tar java-11-openjdk && \
-    yum clean all
 
 # Set working directory
 WORKDIR /opt
@@ -29,9 +24,9 @@ RUN curl -fSL https://dlcdn.apache.org/tomcat/tomcat-8/v8.5.83/bin/apache-tomcat
 
 # Move into Tomcat webapps and deploy WAR
 WORKDIR /opt/tomcat/webapps
-COPY target/*.war /opt/tomcat/webapps/webapp.war
-# If you prefer ROOT:
-# COPY target/*.war /opt/tomcat/webapps/ROOT.war
+
+
+# COPY ~/webapp1/*.war /opt/tomcat/webapps/
 
 # Expose Tomcat port
 EXPOSE 8080
