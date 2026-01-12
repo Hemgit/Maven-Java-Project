@@ -10,6 +10,11 @@ RUN sed -i \
   -e 's|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=http://vault.centos.org/7.9.2009|g' \
   /etc/yum.repos.d/CentOS-Base.repo || true
 
+# Install required tools and Java
+RUN yum clean all && yum makecache && \
+    yum -y update && \
+    yum -y install curl tar java-11-openjdk && \
+    yum clean all
 
 # Set working directory
 WORKDIR /opt
@@ -20,18 +25,14 @@ RUN curl -fSL https://dlcdn.apache.org/tomcat/tomcat-8/v8.5.83/bin/apache-tomcat
     mv apache-tomcat-8.5.83 tomcat && \
     rm -f apache-tomcat.tar.gz
 
-
-
-# Move into Tomcat webapps and deploy WAR
+# Move into Tomcat webapps (deploy your WARs here if needed)
 WORKDIR /opt/tomcat/webapps
-
-
 # COPY ~/webapp1/*.war /opt/tomcat/webapps/
+# Or deploy as ROOT:
+# COPY ~/webapp1/*.war /opt/tomcat/webapps/ROOT.war
 
 # Expose Tomcat port
 EXPOSE 8080
-
-
 
 # Entrypoint to run Tomcat
 ENTRYPOINT ["/opt/tomcat/bin/catalina.sh", "run"]
