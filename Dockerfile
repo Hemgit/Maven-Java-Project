@@ -1,30 +1,47 @@
 
-# Use a supported, RHEL-compatible base
-FROM rockylinux:9
+# Use CentOS 7 base image
+FROM centos:7
 
 LABEL maintainer="RNS <rns@rnstech.com>"
 
-# Update and install curl + Java (OpenJDK 11)
-RUN dnf -y update && \
-    dnf -y install curl tar java-11-openjdk && \
-    dnf clean all
+# Point all repos to the CentOS vault (7.9.2009) and disable mirrorlists
+RUN sed -i \
+  -e 's|^mirrorlist=|#mirrorlist=|g' \
+  -e 's|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=http://vault.centos.org/7.9.2009|g' \
+  /etc/yum.repos.d/CentOS-Base.repo || true
 
-# Work in /opt
+# Clean, update, and install required packages
+RUN yum clean all && yum makecache && \
+    yum -y update && \
+    yum -y install wget curl tar java-11-openjdk && \
+    yum clean all
+
+# Set working directory
 WORKDIR /opt
 
-# Download a maintained Tomcat 8.x release (example: 8.5.83)
-# Check https://tomcat.apache.org/download-80.cgi for the current 8.x release + mirrors
+# Download Tomcat (example: 8.5.83)
 RUN curl -fSL https://dlcdn.apache.org/tomcat/tomcat-8/v8.5.83/bin/apache-tomcat-8.5.83.tar.gz -o apache-tomcat.tar.gz && \
     tar xzf apache-tomcat.tar.gz && \
     mv apache-tomcat-8.5.83 tomcat && \
     rm -f apache-tomcat.tar.gz
 
-# Deploy your app (WAR renamed to webapp.war or ROOT.war)
+# Copy README for reference
+COPY README.md /opt/
+
+# Example environment variable
+ENV test="testing the test variable"
+
+# Move into Tomcat webapps and deploy WAR
 WORKDIR /opt/tomcat/webapps
 COPY target/*.war /opt/tomcat/webapps/webapp.war
 # If you prefer ROOT:
 # COPY target/*.war /opt/tomcat/webapps/ROOT.war
 
+# Expose Tomcat port
 EXPOSE 8080
 
+# Simple CMD (like your original)
+CMD echo "hell this is cmd statement"
+
+# Entrypoint to run Tomcat
 ENTRYPOINT ["/opt/tomcat/bin/catalina.sh", "run"]
