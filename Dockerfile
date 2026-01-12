@@ -1,4 +1,11 @@
-FROM centos:centos7
+FROM centos:7
+
+# Point all repos to the vault and disable mirrorlists
+RUN sed -i \
+  -e 's|^mirrorlist=|#mirrorlist=|g' \
+  -e 's|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=http://vault.centos.org/7.9.2009|g' \
+  /etc/yum.repos.d/CentOS-Base.repo || true
+
 
 LABEL Maintainer=RNS Email=rns@rnstech.com
 
