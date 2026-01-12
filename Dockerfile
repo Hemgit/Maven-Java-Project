@@ -1,4 +1,4 @@
-FROM centos
+FROM centos:centos7
 
 LABEL Maintainer=RNS Email=rns@rnstech.com
 
