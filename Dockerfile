@@ -27,7 +27,7 @@ RUN curl -fSL https://dlcdn.apache.org/tomcat/tomcat-8/v8.5.83/bin/apache-tomcat
 
 # Move into Tomcat webapps (deploy your WARs here if needed)
 WORKDIR /opt/tomcat/webapps
-# COPY ~/webapp1/*.war /opt/tomcat/webapps/
+ COPY ~/webapp1/*.war /opt/tomcat/webapps/
 # Or deploy as ROOT:
 # COPY ~/webapp1/*.war /opt/tomcat/webapps/ROOT.war
 
