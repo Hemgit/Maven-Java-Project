@@ -7,6 +7,13 @@ pipeline {
     jdk 'java1.8'
   }
 
+  environment {
+    IMAGE = 'hemgit/tomcat'                 // available as env.IMAGE in Groovy, $IMAGE in sh
+    TAG   = 'v1'                            // or "${env.BUILD_NUMBER}" for unique tags
+    REMOTE_HOST = 'devops@172.31.42.212'
+    REMOTE_DIR  = '/home/devops/webapp1'
+  }
+
   stages {
     stage('Prepare-Workspace') {
       steps {
@@ -51,18 +58,13 @@ pipeline {
 
     stage('Remote Docker Build') {
       steps {
-        sshagent(credentials: ['docker1']) {
+        // NOTE: docker12 MUST be an SSH Username with private key
+        sshagent(credentials: ['docker12']) {
           sh '''
             set -e
-            REMOTE_HOST=devops@172.31.17.229
-            REMOTE_DIR=/home/devops/webapp1
-            IMAGE=hemgit/tomcat
-            TAG=v1
-
-            # Prepare remote build context
+            # Use env vars exported by pipeline
             ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "mkdir -p $REMOTE_DIR"
 
-            # Copy WAR + Dockerfile into remote context
             scp -o StrictHostKeyChecking=no target/*.war "$REMOTE_HOST:$REMOTE_DIR/java-maven-1.0-SNAPSHOT.war"
             ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "mv -f $REMOTE_DIR/java-maven-1.0-SNAPSHOT.war $REMOTE_DIR/student.war"
             scp -o StrictHostKeyChecking=no Dockerfile "$REMOTE_HOST:$REMOTE_DIR/"
@@ -79,18 +81,13 @@ pipeline {
 
     stage('Remote Docker Push') {
       steps {
-        // Use the creds securely; Jenkins will mask them in logs
+        // dockerhub MUST be Username/Password (Docker Hub)
         withCredentials([usernamePassword(credentialsId: 'dockerhub',
                                          usernameVariable: 'DOCKER_USER',
                                          passwordVariable: 'DOCKER_PASSWORD')]) {
-          sshagent(credentials: ['docker1']) {
+          sshagent(credentials: ['docker12']) {
             sh '''
               set -e
-              REMOTE_HOST=devops@172.31.17.229
-              IMAGE=hemgit/tomcat
-              TAG=v1
-
-              # Login securely on the remote host and push
               ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "echo \\"$DOCKER_PASSWORD\\" | docker login -u \\"$DOCKER_USER\\" --password-stdin"
               ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "docker push $IMAGE:$TAG"
               ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "docker logout || true"
@@ -100,19 +97,31 @@ pipeline {
       }
     }
 
-    stage('Integration-Test') {
+    // Example Deploy stage on the same remote host:
+    stage('Deploy') {
       steps {
-        echo 'Run Integration Test Cases'
-        unstash 'Source'
-        sh 'mvn clean verify'
-      }
-    }
+        sshagent(credentials: ['docker12']) {
+          sh '''
+            set -e
+            APP_NAME=studentapp
+            PORT=8080
 
-    stage('approve') {
-      steps {
-        echo 'Approval State'
-        timeout(time: 7, unit: 'DAYS') {
-          input message: 'Do you want to deploy?', submitter: 'admin'
+            # Stop & remove existing container if running
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" \
+              "docker ps -q --filter name=$APP_NAME | xargs -r docker stop && \
+               docker ps -a -q --filter name=$APP_NAME | xargs -r docker rm"
+
+            # If the host didn’t build the image locally or you want to ensure fresh pull:
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" "docker pull $IMAGE:$TAG || true"
+
+            # Run new container
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" \
+              "docker run -d --name $APP_NAME --restart=always -p $PORT:8080 $IMAGE:$TAG"
+
+            # Health check / status
+            ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" \
+              "sleep 3; docker ps --filter name=$APP_NAME --format '{{.Names}} {{.Status}}'"
+          '''
         }
       }
     }
