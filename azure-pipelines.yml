@@ -126,9 +126,7 @@ stages:
           cd "$(REMOTE_DIR)" && mv *war student.war && 
           docker build -t "$(IMAGE):$(TAG)" -f Dockerfile .
 
-          echo "Docker images:"
-          docker images | grep "$(IMAGE)"
-
+      
 # ---------------------------------------------------------------------------
 # 3) REMOTE DOCKER PUSH
 # ---------------------------------------------------------------------------
