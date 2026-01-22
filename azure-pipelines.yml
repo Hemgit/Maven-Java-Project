@@ -1,6 +1,6 @@
 
 # =========================
-# Hemgit Maven → Docker → Deploy (multi-stage) — Fixed
+# Hemgit Maven → Docker → Deploy (multi-stage) — Corrected
 # =========================
 
 name: $(Build.DefinitionName)_$(Build.SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
@@ -18,7 +18,7 @@ variables:
   TAG: '$(Build.BuildNumber)'          # Unique tag per build
   REMOTE_DIR: '/home/devops/webapp1'   # Working dir on the remote host
   APP_NAME: 'studentapp'               # Container name
-  PORT: '8080'                         # Host port to expose -> container 8080
+  PORT: '8080'                         # Host port -> container 8080
 
 stages:
 
@@ -111,7 +111,7 @@ stages:
         runOptions: 'commands'
         commands: |
           set -e
-          mkdir -p $(REMOTE_DIR)/target
+          mkdir -p "$(REMOTE_DIR)/target"
         readyTimeout: '20000'
 
     # Copy Dockerfile from repo to remote working dir
@@ -124,7 +124,7 @@ stages:
         targetFolder: '$(REMOTE_DIR)'
         readyTimeout: '20000'
 
-    # Copy WAR (keep structure simple: copy into remote/target)
+    # Copy WAR (copy into remote/target)
     - task: CopyFilesOverSSH@0
       displayName: 'Copy WAR to remote/target'
       inputs:
@@ -134,26 +134,45 @@ stages:
         targetFolder: '$(REMOTE_DIR)/target'
         readyTimeout: '20000'
 
-    # Rename WAR to student.war & build image on remote
+    # Rename WAR to student.war & build image on remote — heredoc to avoid EOF/CRLF issues
     - task: SSH@0
       displayName: 'Rename WAR and docker build'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
         commands: |
+          set -e
+
+          # Write a clean, Unix-line-endings script remotely and run it
+          cat > /tmp/rename_and_build.sh <<'SCRIPT'
           set -euo pipefail
-          WAR_FILE="$(find "$(REMOTE_DIR)/target" -maxdepth 1 -type f -name '*.war' -print -quit)"
+
+          WAR_DIR="$(REMOTE_DIR)/target"
+          WAR_FILE="$(find "${WAR_DIR}" -maxdepth 1 -type f -name '*.war' -print -quit)"
+
           if [ -z "${WAR_FILE}" ]; then
-            echo "ERROR: No WAR found under $(REMOTE_DIR)/target"
-            ls -l "$(REMOTE_DIR)/target" || true
+            echo "ERROR: No WAR found under ${WAR_DIR}"
+            ls -l "${WAR_DIR}" || true
             exit 1
           fi
+
+          # Move/rename to match Dockerfile COPY student.war
           mv -f "${WAR_FILE}" "$(REMOTE_DIR)/student.war"
 
-          cd $(REMOTE_DIR)
+          cd "$(REMOTE_DIR)"
           echo "Building image $(IMAGE):$(TAG)"
-          docker build -t $(IMAGE):$(TAG) .
-          docker images | grep "$(IMAGE)" || true
+          docker build -t "$(IMAGE):$(TAG)" .
+
+          echo "Built images matching repository:"
+          docker images | awk '$1 ~ /^(IMAGE_REPO)$/ {print}'
+          SCRIPT
+
+          # Expand IMAGE repo into the awk filter (safe variable subst) and fix CRLF if any
+          sed -i "s/^(IMAGE_REPO)$/$(IMAGE | sed 's/[^^]/[&]/g; s/\^/\\^/g')/" /tmp/rename_and_build.sh || true
+          sed -i 's/\r$//' /tmp/rename_and_build.sh
+
+          bash /tmp/rename_and_build.sh
+          rm -f /tmp/rename_and_build.sh
         readyTimeout: '20000'
 
 # ---------------------------------------------------------------------------
@@ -179,7 +198,7 @@ stages:
         commands: |
           set -e
           echo "$(dockerhub.password)" | docker login -u "$(dockerhub.user)" --password-stdin
-          docker push $(IMAGE):$(TAG)
+          docker push "$(IMAGE):$(TAG)"
           docker logout || true
         readyTimeout: '20000'
 
@@ -207,6 +226,12 @@ stages:
           docker ps -a -q --filter "name=$(APP_NAME)" | xargs -r docker rm || true
 
           # Pull (may be a no-op if image exists locally)
-          docker pull $(IMAGE):$(TAG) || true
+          docker pull "$(IMAGE):$(TAG)" || true
 
           # Run new container
+          docker run -d --name "$(APP_NAME)" --restart=always -p "$(PORT):8080" "$(IMAGE):$(TAG)"
+
+          # Quick health info
+          sleep 5
+          docker ps --filter "name=$(APP_NAME)" --format '{{.Names}} {{.Status}}'
+        readyTimeout: '20000'
