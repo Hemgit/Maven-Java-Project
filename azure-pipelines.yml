@@ -1,7 +1,4 @@
 
-
-
-    
 # Name similar to your Jenkins run name
 name: $(Build.DefinitionName)_$(Build.SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
 
@@ -10,7 +7,6 @@ trigger:
 - master
 
 # Use a self-hosted agent that has network reachability to 172.31.42.212
-# If you have a self-hosted pool, set its name below.
 pool:
   name: awspool  # <-- replace with your self-hosted pool name
 
@@ -35,13 +31,13 @@ stages:
     - checkout: self
       persistCredentials: true
 
-    # If you strictly need JDK 1.8, uncomment the JavaToolInstaller below.
-    # - task: JavaToolInstaller@0
-    #   displayName: 'Install AdoptOpenJDK 1.8'
-    #   inputs:
-    #     versionSpec: '8'
-    #     jdkArchitectureOption: 'x64'
-    #     jdkSourceOption: 'PreInstalled' # or 'AzureStorage' if you host JDK
+    # Install JDK 1.8 for this job (Option B)
+    - task: JavaToolInstaller@0
+      displayName: 'Install JDK 8 (Temurin)'
+      inputs:
+        versionSpec: '8'                 # or '1.8'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'  # Use 'AzureStorage' if you host binaries internally
 
     # Compile
     - task: Maven@3
@@ -50,7 +46,7 @@ stages:
         mavenPomFile: 'pom.xml'
         goals: 'clean compile'
         publishJUnitResults: false
-        jdkVersionOption: '1.8'   # set to '1.17' if you prefer a newer JDK on the agent
+        jdkVersionOption: '1.8'          # Uses JDK set by JavaToolInstaller
 
     # Unit tests + publish JUnit
     - task: Maven@3
@@ -71,7 +67,7 @@ stages:
         publishJUnitResults: false
         jdkVersionOption: '1.8'
 
-    # Stage the WAR for publishing as build artifact (optional, useful for traceability)
+    # Stage the WAR for publishing as build artifact (useful for traceability)
     - task: CopyFiles@2
       displayName: 'Stage WAR to $(Build.ArtifactStagingDirectory)'
       inputs:
