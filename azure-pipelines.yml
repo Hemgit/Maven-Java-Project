@@ -109,7 +109,7 @@ stages:
       displayName: 'Copy WAR to remote target folder'
       inputs:
         sshEndpoint: 'ssh-docker-host'
-        sourceFolder: '$(Pipeline.Workspace)/war'
+        sourceFolder: '$(Pipeline.Workspace)/war/target'
         contents: '*.war'
         targetFolder: '$(REMOTE_DIR)'
 
