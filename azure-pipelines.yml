@@ -70,7 +70,7 @@ stages:
 - stage: RemoteBuild
   displayName: 'Remote Docker Build'
   dependsOn: BuildAndTest
-  condition: succeeded()
+  condition: always()
   jobs:
   - job: RemoteDockerBuild
     steps:
