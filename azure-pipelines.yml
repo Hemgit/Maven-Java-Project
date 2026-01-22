@@ -1,6 +1,6 @@
 
 # =========================
-# Hemgit Maven → Docker → Deploy (multi-stage) — Corrected
+# Hemgit Maven → Docker → Deploy (multi-stage)
 # =========================
 
 name: $(Build.DefinitionName)_$(Build.SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
@@ -8,17 +8,15 @@ name: $(Build.DefinitionName)_$(Build.SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r
 trigger:
 - master
 
-# Self-hosted agent pool that can reach the remote host (172.31.x.x)
 pool:
   name: awspool
 
-# Global variables
 variables:
-  IMAGE: 'hemgit/tomcat'               # Docker image name
-  TAG: '$(Build.BuildNumber)'          # Unique tag per build
-  REMOTE_DIR: '/home/devops/webapp1'   # Working dir on the remote host
-  APP_NAME: 'studentapp'               # Container name
-  PORT: '8080'                         # Host port -> container 8080
+  IMAGE: 'hemgit/tomcat'
+  TAG: '$(Build.BuildNumber)'
+  REMOTE_DIR: '/home/devops/webapp1'
+  APP_NAME: 'studentapp'
+  PORT: '8080'
 
 stages:
 
@@ -30,23 +28,18 @@ stages:
   jobs:
   - job: Build
     displayName: 'Maven build, test, package'
-    timeoutInMinutes: 30
     steps:
     - checkout: self
-      persistCredentials: true
 
-    # Compile
     - task: Maven@3
       displayName: 'mvn clean compile'
       inputs:
         mavenPomFile: 'pom.xml'
         goals: 'clean compile'
-        publishJUnitResults: false
         jdkVersionOption: '1.8'
 
-    # Test + publish JUnit
     - task: Maven@3
-      displayName: 'mvn test (Publish JUnit)'
+      displayName: 'mvn test'
       inputs:
         mavenPomFile: 'pom.xml'
         goals: 'test'
@@ -54,28 +47,22 @@ stages:
         testResultsFiles: 'target/surefire-reports/*.xml'
         jdkVersionOption: '1.8'
 
-    # Package WAR (skip tests, already ran)
     - task: Maven@3
       displayName: 'mvn package -DskipTests'
       inputs:
         mavenPomFile: 'pom.xml'
         goals: 'package -DskipTests'
-        publishJUnitResults: false
         jdkVersionOption: '1.8'
 
-    # Stage WAR as artifact
     - task: CopyFiles@2
-      displayName: 'Stage WAR to $(Build.ArtifactStagingDirectory)'
       inputs:
         contents: 'target/*.war'
         targetFolder: '$(Build.ArtifactStagingDirectory)'
 
     - task: PublishPipelineArtifact@1
-      displayName: 'Publish pipeline artifact: war'
       inputs:
         targetPath: '$(Build.ArtifactStagingDirectory)'
         artifact: 'war'
-        publishLocation: 'pipeline'
 
 # ---------------------------------------------------------------------------
 # 2) REMOTE DOCKER BUILD
@@ -86,135 +73,113 @@ stages:
   condition: succeeded()
   jobs:
   - job: RemoteDockerBuild
-    displayName: 'Copy WAR & Dockerfile, docker build on remote host'
-    timeoutInMinutes: 30
     steps:
+
     - checkout: self
 
-    # Download WAR artifact from Build stage
     - task: DownloadPipelineArtifact@2
-      displayName: 'Download pipeline artifact: war'
       inputs:
         artifact: 'war'
         path: '$(Pipeline.Workspace)/war'
 
     - script: |
-        echo "Listing downloaded WAR artifact files:"
-        ls -lR "$(Pipeline.Workspace)/war" || true
-      displayName: 'Sanity: list artifact files'
+        echo "Artifacts after download:"
+        ls -lR "$(Pipeline.Workspace)/war"
+      displayName: 'Sanity check artifacts'
 
-    # Ensure remote folders exist (including target/)
     - task: SSH@0
-      displayName: 'Create remote directory structure'
+      displayName: 'Prepare remote directory'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
         commands: |
-          set -e
           mkdir -p "$(REMOTE_DIR)/target"
-        readyTimeout: '20000'
 
-    # Copy Dockerfile from repo to remote working dir
+    # Copy Dockerfile
     - task: CopyFilesOverSSH@0
-      displayName: 'Copy Dockerfile to remote'
+      displayName: 'Copy Dockerfile'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         sourceFolder: '$(Build.SourcesDirectory)'
         contents: 'Dockerfile'
         targetFolder: '$(REMOTE_DIR)'
-        readyTimeout: '20000'
 
-    # Copy WAR (copy into remote/target)
+    # Copy WAR file into /target
     - task: CopyFilesOverSSH@0
-      displayName: 'Copy WAR to remote/target'
+      displayName: 'Copy WAR to remote target folder'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         sourceFolder: '$(Pipeline.Workspace)/war'
         contents: '**/*.war'
-        targetFolder: '$(REMOTE_DIR)/student.war'
-        readyTimeout: '20000'
+        targetFolder: '$(REMOTE_DIR)/target'
 
-    # Rename WAR to student.war & build image on remote — heredoc to avoid EOF/CRLF issues
+    # Rename + docker build
     - task: SSH@0
-      displayName: 'docker build'
+      displayName: 'Rename WAR and build image'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
-        commands: |
-          
-          cd "$(REMOTE_DIR)"
-          echo "Building image $(IMAGE):$(TAG)"
-          docker build -t "$(IMAGE):$(TAG)" .
-
-          echo "Built images matching repository:"
-          docker images | awk '$1 ~ /^(IMAGE_REPO)$/ {print}'
-          SCRIPT
-
-          # Expand IMAGE repo into the awk filter (safe variable subst) and fix CRLF if any
-          sed -i "s/^(IMAGE_REPO)$/$(IMAGE | sed 's/[^^]/[&]/g; s/\^/\\^/g')/" /tmp/rename_and_build.sh || true
-          sed -i 's/\r$//' /tmp/rename_and_build.sh
-
-          bash /tmp/rename_and_build.sh
-          rm -f /tmp/rename_and_build.sh
-        readyTimeout: '20000'
-
-# ---------------------------------------------------------------------------
-# 3) REMOTE DOCKER PUSH (Docker Hub)
-# ---------------------------------------------------------------------------
-- stage: RemotePush
-  displayName: 'Remote Docker Push'
-  dependsOn: RemoteBuild
-  condition: succeeded()
-  jobs:
-  - job: DockerPush
-    displayName: 'docker login & push on remote host'
-    timeoutInMinutes: 20
-    steps:
-    - task: SSH@0
-      displayName: 'docker login & push'
-      inputs:
-        sshEndpoint: 'ssh-docker-host'
-        runOptions: 'commands'
-        # Requires variable group or pipeline variables:
-        #   dockerhub.user      (secret)
-        #   dockerhub.password  (secret)
         commands: |
           set -e
+          echo "Checking remote folders..."
+          ls -l "$(REMOTE_DIR)"
+          ls -l "$(REMOTE_DIR)/target"
+
+          WAR_FILE=$(find "$(REMOTE_DIR)/target" -maxdepth 1 -type f -name '*.war' -print -quit)
+          if [ -z "$WAR_FILE" ]; then
+            echo "WAR not found!"
+            exit 1
+          fi
+
+          # Remove wrong directory if present
+          if [ -d "$(REMOTE_DIR)/student.war" ]; then
+            rm -rf "$(REMOTE_DIR)/student.war"
+          fi
+
+          mv -f "$WAR_FILE" "$(REMOTE_DIR)/student.war"
+
+          cd "$(REMOTE_DIR)"
+          docker build -t "$(IMAGE):$(TAG)" -f Dockerfile .
+
+          echo "Docker images:"
+          docker images | grep "$(IMAGE)"
+
+# ---------------------------------------------------------------------------
+# 3) REMOTE DOCKER PUSH
+# ---------------------------------------------------------------------------
+- stage: RemotePush
+  dependsOn: RemoteBuild
+  jobs:
+  - job: DockerPush
+    steps:
+    - task: SSH@0
+      displayName: 'Push to Docker Hub'
+      inputs:
+        sshEndpoint: 'ssh-docker-host'
+        runOptions: 'commands'
+        commands: |
           echo "$(dockerhub.password)" | docker login -u "$(dockerhub.user)" --password-stdin
           docker push "$(IMAGE):$(TAG)"
           docker logout || true
-        readyTimeout: '20000'
 
 # ---------------------------------------------------------------------------
-# 4) DEPLOY (on the same remote host)
+# 4) DEPLOY
 # ---------------------------------------------------------------------------
 - stage: Deploy
-  displayName: 'Deploy container on remote host'
   dependsOn: RemotePush
-  condition: succeeded()
   jobs:
   - job: RemoteDeploy
-    displayName: 'Stop old, run new container'
-    timeoutInMinutes: 20
     steps:
     - task: SSH@0
-      displayName: 'Stop/remove old; pull & run new'
+      displayName: 'Deploy container'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
         commands: |
-          set -e
-          # Stop & remove existing container if present
-          docker ps -q --filter "name=$(APP_NAME)" | xargs -r docker stop || true
-          docker ps -a -q --filter "name=$(APP_NAME)" | xargs -r docker rm || true
-
-          # Pull (may be a no-op if image exists locally)
+          docker ps -q --filter "name=$(APP_NAME)" | xargs -r docker stop
+          docker ps -a -q --filter "name=$(APP_NAME)" | xargs -r docker rm
+          
           docker pull "$(IMAGE):$(TAG)" || true
-
-          # Run new container
+          
           docker run -d --name "$(APP_NAME)" --restart=always -p "$(PORT):8080" "$(IMAGE):$(TAG)"
-
-          # Quick health info
-          sleep 5
-          docker ps --filter "name=$(APP_NAME)" --format '{{.Names}} {{.Status}}'
-        readyTimeout: '20000'
+          docker ps | grep "$(APP_NAME)"
