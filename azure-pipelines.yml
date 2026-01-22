@@ -1,58 +1,50 @@
 
+# =========================
+# Hemgit Maven → Docker → Deploy (multi-stage)
+# =========================
 
-
-    
-# Name similar to your Jenkins run name
 name: $(Build.DefinitionName)_$(Build.SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
 
-# CI trigger (change as needed)
 trigger:
 - master
 
-# Use a self-hosted agent that has network reachability to 172.31.42.212
-# If you have a self-hosted pool, set its name below.
+# Self-hosted agent that can reach the remote host (172.31.x.x)
 pool:
-  name: awspool  # <-- replace with your self-hosted pool name
+  name: awspool
 
 # Global variables
 variables:
-  IMAGE: 'hemgit/tomcat'         # Docker image name
-  TAG: 'v1'                      # or use $(Build.BuildNumber) for unique tags
+  IMAGE: 'hemgit/tomcat'          # Docker image name
+  TAG: 'v1'                       # Change to $(Build.BuildNumber) for unique tags
   REMOTE_DIR: '/home/devops/webapp1'
   APP_NAME: 'studentapp'
   PORT: '8080'
 
 stages:
+
 # ---------------------------------------------------------------------------
-# BUILD & TEST
+# 1) BUILD & TEST
 # ---------------------------------------------------------------------------
 - stage: BuildAndTest
   displayName: 'Build & Test'
   jobs:
   - job: Build
     displayName: 'Maven build, test, package'
+    timeoutInMinutes: 30
     steps:
     - checkout: self
       persistCredentials: true
 
-    # If you strictly need JDK 1.8, uncomment the JavaToolInstaller below.
-    # - task: JavaToolInstaller@0
-    #   displayName: 'Install AdoptOpenJDK 1.8'
-    #   inputs:
-    #     versionSpec: '8'
-    #     jdkArchitectureOption: 'x64'
-    #     jdkSourceOption: 'PreInstalled' # or 'AzureStorage' if you host JDK
-
-    # Compile
+    # Java 8 is already installed and exposed as JAVA_HOME_8_X64 on the agent.
+    # Just tell Maven task to use it.
     - task: Maven@3
       displayName: 'mvn clean compile'
       inputs:
         mavenPomFile: 'pom.xml'
         goals: 'clean compile'
         publishJUnitResults: false
-        jdkVersionOption: '1.8'   # set to '1.17' if you prefer a newer JDK on the agent
+        jdkVersionOption: '1.8'
 
-    # Unit tests + publish JUnit
     - task: Maven@3
       displayName: 'mvn clean test (Publish JUnit)'
       inputs:
@@ -62,7 +54,6 @@ stages:
         testResultsFiles: 'target/surefire-reports/*.xml'
         jdkVersionOption: '1.8'
 
-    # Package (skip tests)
     - task: Maven@3
       displayName: 'mvn clean package -DskipTests'
       inputs:
@@ -71,22 +62,23 @@ stages:
         publishJUnitResults: false
         jdkVersionOption: '1.8'
 
-    # Stage the WAR for publishing as build artifact (optional, useful for traceability)
+    # Stage the WAR for pipeline artifact publishing
     - task: CopyFiles@2
       displayName: 'Stage WAR to $(Build.ArtifactStagingDirectory)'
       inputs:
         contents: 'target/*.war'
         targetFolder: '$(Build.ArtifactStagingDirectory)'
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish WAR artifact'
+    # Publish as Pipeline Artifact (so we can DownloadPipelineArtifact in later stages)
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish pipeline artifact: war'
       inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-        ArtifactName: 'war'
-        publishLocation: 'Container'
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'war'
+        publishLocation: 'pipeline'
 
 # ---------------------------------------------------------------------------
-# REMOTE DOCKER BUILD ON 172.31.42.212
+# 2) REMOTE DOCKER BUILD
 # ---------------------------------------------------------------------------
 - stage: RemoteBuild
   displayName: 'Remote Docker Build'
@@ -95,40 +87,56 @@ stages:
   jobs:
   - job: RemoteDockerBuild
     displayName: 'Copy WAR & Dockerfile, docker build on remote host'
+    timeoutInMinutes: 30
     steps:
-    # Ensure target directory exists
+    # Make sure we have repo files (Dockerfile) on this job's workspace
+    - checkout: self
+
+    # Download the WAR artifact produced by the Build stage
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download pipeline artifact: war'
+      inputs:
+        artifact: 'war'
+        path: '$(Pipeline.Workspace)/war'
+
+    # (Optional) Sanity: list downloaded files
+    - script: |
+        echo "Listing downloaded artifact files:"
+        ls -lR "$(Pipeline.Workspace)/war" || true
+      displayName: 'Sanity: list artifact files'
+
+    # Ensure target directory exists on the remote host
     - task: SSH@0
       displayName: 'Create remote directory'
       inputs:
-        sshEndpoint: 'ssh-docker-host'     # <-- your SSH service connection
+        sshEndpoint: 'ssh-docker-host'   # <-- ensure this service connection points to the correct IP
         runOptions: 'commands'
         commands: |
           set -e
           mkdir -p $(REMOTE_DIR)
         readyTimeout: '20000'
-        # disableHostKeyChecking: true   # uncomment if you want to skip host key check
 
-    # Copy Dockerfile
+    # Copy Dockerfile from repo workspace to remote
     - task: CopyFilesOverSSH@0
       displayName: 'Copy Dockerfile to remote'
       inputs:
         sshEndpoint: 'ssh-docker-host'
-        sourceFolder: '$(System.DefaultWorkingDirectory)'
+        sourceFolder: '$(Build.SourcesDirectory)'
         contents: 'Dockerfile'
         targetFolder: '$(REMOTE_DIR)'
         readyTimeout: '20000'
 
-    # Copy WAR
+    # Copy WAR from the downloaded artifact folder to remote
     - task: CopyFilesOverSSH@0
       displayName: 'Copy WAR to remote'
       inputs:
         sshEndpoint: 'ssh-docker-host'
-        sourceFolder: '$(System.DefaultWorkingDirectory)'
-        contents: 'target/*.war'
+        sourceFolder: '$(Pipeline.Workspace)/war'
+        contents: '**/*.war'
         targetFolder: '$(REMOTE_DIR)'
         readyTimeout: '20000'
 
-    # Rename WAR to student.war and build image
+    # Rename WAR and build the Docker image on the remote host
     - task: SSH@0
       displayName: 'Rename WAR and docker build'
       inputs:
@@ -136,7 +144,6 @@ stages:
         runOptions: 'commands'
         commands: |
           set -e
-          # pick the first WAR copied (adjust if you know the exact name)
           WAR_FILE="$(ls $(REMOTE_DIR)/*.war | head -n1)"
           mv -f "$WAR_FILE" "$(REMOTE_DIR)/student.war"
 
@@ -146,7 +153,7 @@ stages:
         readyTimeout: '20000'
 
 # ---------------------------------------------------------------------------
-# REMOTE DOCKER PUSH (Docker Hub)
+# 3) REMOTE DOCKER PUSH (Docker Hub)
 # ---------------------------------------------------------------------------
 - stage: RemotePush
   displayName: 'Remote Docker Push'
@@ -155,13 +162,16 @@ stages:
   jobs:
   - job: DockerPush
     displayName: 'docker login & push on remote host'
+    timeoutInMinutes: 20
     steps:
     - task: SSH@0
       displayName: 'docker login & push'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
-        # You must define dockerhub.user and dockerhub.password as pipeline variables (password as secret)
+        # Requires pipeline variables:
+        #   dockerhub.user      (secret)
+        #   dockerhub.password  (secret)
         commands: |
           set -e
           echo "$(dockerhub.password)" | docker login -u "$(dockerhub.user)" --password-stdin
@@ -170,7 +180,7 @@ stages:
         readyTimeout: '20000'
 
 # ---------------------------------------------------------------------------
-# DEPLOY (on the same remote host)
+# 4) DEPLOY (on the same remote host)
 # ---------------------------------------------------------------------------
 - stage: Deploy
   displayName: 'Deploy container on remote host'
@@ -179,6 +189,7 @@ stages:
   jobs:
   - job: RemoteDeploy
     displayName: 'Stop old, run new container'
+    timeoutInMinutes: 20
     steps:
     - task: SSH@0
       displayName: 'Stop/remove old; pull & run new'
@@ -187,19 +198,17 @@ stages:
         runOptions: 'commands'
         commands: |
           set -e
-
           # Stop & remove existing container if present
           docker ps -q --filter "name=$(APP_NAME)" | xargs -r docker stop
           docker ps -a -q --filter "name=$(APP_NAME)" | xargs -r docker rm
 
-          # Ensure we have the image; if built locally, pull is a no-op or refresh
+          # Pull (may be a no-op if built locally)
           docker pull $(IMAGE):$(TAG) || true
 
           # Run new container
           docker run -d --name $(APP_NAME) --restart=always -p $(PORT):8080 $(IMAGE):$(TAG)
 
-          # Health / status
+          # Health check
           sleep 3
           docker ps --filter "name=$(APP_NAME)" --format '{{.Names}} {{.Status}}'
         readyTimeout: '20000'
-
