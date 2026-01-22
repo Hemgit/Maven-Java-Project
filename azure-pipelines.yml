@@ -131,34 +131,17 @@ stages:
         sshEndpoint: 'ssh-docker-host'
         sourceFolder: '$(Pipeline.Workspace)/war'
         contents: '**/*.war'
-        targetFolder: '$(REMOTE_DIR)/target'
+        targetFolder: '$(REMOTE_DIR)/target/student.war'
         readyTimeout: '20000'
 
     # Rename WAR to student.war & build image on remote — heredoc to avoid EOF/CRLF issues
     - task: SSH@0
-      displayName: 'Rename WAR and docker build'
+      displayName: 'docker build'
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
         commands: |
-          set -e
-
-          # Write a clean, Unix-line-endings script remotely and run it
-          cat > /tmp/rename_and_build.sh <<'SCRIPT'
-          set -euo pipefail
-
-          WAR_DIR="$(REMOTE_DIR)/target"
-          WAR_FILE="$(find "${WAR_DIR}" -maxdepth 1 -type f -name '*.war' -print -quit)"
-
-          if [ -z "${WAR_FILE}" ]; then
-            echo "ERROR: No WAR found under ${WAR_DIR}"
-            ls -l "${WAR_DIR}" || true
-            exit 1
-          fi
-
-          # Move/rename to match Dockerfile COPY student.war
-          mv -f "${WAR_FILE}" "$(REMOTE_DIR)/student.war"
-
+          
           cd "$(REMOTE_DIR)"
           echo "Building image $(IMAGE):$(TAG)"
           docker build -t "$(IMAGE):$(TAG)" .
