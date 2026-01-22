@@ -131,7 +131,7 @@ stages:
         sshEndpoint: 'ssh-docker-host'
         sourceFolder: '$(Pipeline.Workspace)/war'
         contents: '**/*.war'
-        targetFolder: '$(REMOTE_DIR)/target/student.war'
+        targetFolder: '$(REMOTE_DIR)/student.war'
         readyTimeout: '20000'
 
     # Rename WAR to student.war & build image on remote — heredoc to avoid EOF/CRLF issues
