@@ -109,9 +109,9 @@ stages:
       displayName: 'Copy WAR to remote target folder'
       inputs:
         sshEndpoint: 'ssh-docker-host'
-        sourceFolder: '$(Pipeline.Workspace)/war/target'
+        sourceFolder: '$(Pipeline.Workspace)/war'
         contents: '*.war'
-        targetFolder: '$(REMOTE_DIR)/student.war'
+        targetFolder: '$(REMOTE_DIR)'
 
     # Rename + docker build
     - task: SSH@0
