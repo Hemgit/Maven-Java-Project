@@ -120,6 +120,7 @@ stages:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
         commands: 
+        
                 
 
           cd "$(REMOTE_DIR)"
