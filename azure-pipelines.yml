@@ -109,7 +109,7 @@ stages:
       displayName: 'Copy WAR to remote target folder'
       inputs:
         sshEndpoint: 'ssh-docker-host'
-        sourceFolder: '$(Pipeline.Workspace)/war'
+        sourceFolder: '$(Pipeline.Workspace)/war/target'
         contents: '*.war'
         targetFolder: '$(REMOTE_DIR)'
 
@@ -133,10 +133,10 @@ stages:
 
           # Remove wrong directory if present
           if [ -d "$(REMOTE_DIR)/student.war" ]; then
-            rm -rf "$(REMOTE_DIR)/student.war"
+            echo "$(REMOTE_DIR)/student.war"
           fi
 
-          mv -f "$WAR_FILE" "$(REMOTE_DIR)/student.war"
+        
 
           cd "$(REMOTE_DIR)"
           docker build -t "$(IMAGE):$(TAG)" -f Dockerfile .
