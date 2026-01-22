@@ -1,4 +1,7 @@
 
+
+
+    
 # Name similar to your Jenkins run name
 name: $(Build.DefinitionName)_$(Build.SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
 
@@ -7,6 +10,7 @@ trigger:
 - master
 
 # Use a self-hosted agent that has network reachability to 172.31.42.212
+# If you have a self-hosted pool, set its name below.
 pool:
   name: awspool  # <-- replace with your self-hosted pool name
 
@@ -31,13 +35,13 @@ stages:
     - checkout: self
       persistCredentials: true
 
-    # Install JDK 1.8 for this job (Option B)
-    - task: JavaToolInstaller@0
-      displayName: 'Install JDK 8 (Temurin)'
-      inputs:
-        versionSpec: '8'                 # or '1.8'
-        jdkArchitectureOption: 'x64'
-        jdkSourceOption: 'PreInstalled'  # Use 'AzureStorage' if you host binaries internally
+    # If you strictly need JDK 1.8, uncomment the JavaToolInstaller below.
+    # - task: JavaToolInstaller@0
+    #   displayName: 'Install AdoptOpenJDK 1.8'
+    #   inputs:
+    #     versionSpec: '8'
+    #     jdkArchitectureOption: 'x64'
+    #     jdkSourceOption: 'PreInstalled' # or 'AzureStorage' if you host JDK
 
     # Compile
     - task: Maven@3
@@ -46,7 +50,7 @@ stages:
         mavenPomFile: 'pom.xml'
         goals: 'clean compile'
         publishJUnitResults: false
-        jdkVersionOption: '1.8'          # Uses JDK set by JavaToolInstaller
+        jdkVersionOption: '1.8'   # set to '1.17' if you prefer a newer JDK on the agent
 
     # Unit tests + publish JUnit
     - task: Maven@3
@@ -67,7 +71,7 @@ stages:
         publishJUnitResults: false
         jdkVersionOption: '1.8'
 
-    # Stage the WAR for publishing as build artifact (useful for traceability)
+    # Stage the WAR for publishing as build artifact (optional, useful for traceability)
     - task: CopyFiles@2
       displayName: 'Stage WAR to $(Build.ArtifactStagingDirectory)'
       inputs:
@@ -80,3 +84,122 @@ stages:
         PathtoPublish: '$(Build.ArtifactStagingDirectory)'
         ArtifactName: 'war'
         publishLocation: 'Container'
+
+# ---------------------------------------------------------------------------
+# REMOTE DOCKER BUILD ON 172.31.42.212
+# ---------------------------------------------------------------------------
+- stage: RemoteBuild
+  displayName: 'Remote Docker Build'
+  dependsOn: BuildAndTest
+  condition: succeeded()
+  jobs:
+  - job: RemoteDockerBuild
+    displayName: 'Copy WAR & Dockerfile, docker build on remote host'
+    steps:
+    # Ensure target directory exists
+    - task: SSH@0
+      displayName: 'Create remote directory'
+      inputs:
+        sshEndpoint: 'ssh-docker-host'     # <-- your SSH service connection
+        runOptions: 'commands'
+        commands: |
+          set -e
+          mkdir -p $(REMOTE_DIR)
+        readyTimeout: '20000'
+        # disableHostKeyChecking: true   # uncomment if you want to skip host key check
+
+    # Copy Dockerfile
+    - task: CopyFilesOverSSH@0
+      displayName: 'Copy Dockerfile to remote'
+      inputs:
+        sshEndpoint: 'ssh-docker-host'
+        sourceFolder: '$(System.DefaultWorkingDirectory)'
+        contents: 'Dockerfile'
+        targetFolder: '$(REMOTE_DIR)'
+        readyTimeout: '20000'
+
+    # Copy WAR
+    - task: CopyFilesOverSSH@0
+      displayName: 'Copy WAR to remote'
+      inputs:
+        sshEndpoint: 'ssh-docker-host'
+        sourceFolder: '$(System.DefaultWorkingDirectory)'
+        contents: 'target/*.war'
+        targetFolder: '$(REMOTE_DIR)'
+        readyTimeout: '20000'
+
+    # Rename WAR to student.war and build image
+    - task: SSH@0
+      displayName: 'Rename WAR and docker build'
+      inputs:
+        sshEndpoint: 'ssh-docker-host'
+        runOptions: 'commands'
+        commands: |
+          set -e
+          # pick the first WAR copied (adjust if you know the exact name)
+          WAR_FILE="$(ls $(REMOTE_DIR)/*.war | head -n1)"
+          mv -f "$WAR_FILE" "$(REMOTE_DIR)/student.war"
+
+          cd $(REMOTE_DIR)
+          docker build -t $(IMAGE):$(TAG) .
+          docker images | grep "$(IMAGE)"
+        readyTimeout: '20000'
+
+# ---------------------------------------------------------------------------
+# REMOTE DOCKER PUSH (Docker Hub)
+# ---------------------------------------------------------------------------
+- stage: RemotePush
+  displayName: 'Remote Docker Push'
+  dependsOn: RemoteBuild
+  condition: succeeded()
+  jobs:
+  - job: DockerPush
+    displayName: 'docker login & push on remote host'
+    steps:
+    - task: SSH@0
+      displayName: 'docker login & push'
+      inputs:
+        sshEndpoint: 'ssh-docker-host'
+        runOptions: 'commands'
+        # You must define dockerhub.user and dockerhub.password as pipeline variables (password as secret)
+        commands: |
+          set -e
+          echo "$(dockerhub.password)" | docker login -u "$(dockerhub.user)" --password-stdin
+          docker push $(IMAGE):$(TAG)
+          docker logout || true
+        readyTimeout: '20000'
+
+# ---------------------------------------------------------------------------
+# DEPLOY (on the same remote host)
+# ---------------------------------------------------------------------------
+- stage: Deploy
+  displayName: 'Deploy container on remote host'
+  dependsOn: RemotePush
+  condition: succeeded()
+  jobs:
+  - job: RemoteDeploy
+    displayName: 'Stop old, run new container'
+    steps:
+    - task: SSH@0
+      displayName: 'Stop/remove old; pull & run new'
+      inputs:
+        sshEndpoint: 'ssh-docker-host'
+        runOptions: 'commands'
+        commands: |
+          set -e
+
+          # Stop & remove existing container if present
+          docker ps -q --filter "name=$(APP_NAME)" | xargs -r docker stop
+          docker ps -a -q --filter "name=$(APP_NAME)" | xargs -r docker rm
+
+          # Ensure we have the image; if built locally, pull is a no-op or refresh
+          docker pull $(IMAGE):$(TAG) || true
+
+          # Run new container
+          docker run -d --name $(APP_NAME) --restart=always -p $(PORT):8080 $(IMAGE):$(TAG)
+
+          # Health / status
+          sleep 3
+          docker ps --filter "name=$(APP_NAME)" --format '{{.Names}} {{.Status}}'
+        readyTimeout: '20000'
+
