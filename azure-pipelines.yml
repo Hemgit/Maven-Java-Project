@@ -110,7 +110,7 @@ stages:
       inputs:
         sshEndpoint: 'ssh-docker-host'
         sourceFolder: '$(Pipeline.Workspace)/war'
-        contents: '**/*.war'
+        contents: '*.war'
         targetFolder: '$(REMOTE_DIR)'
 
     # Rename + docker build
