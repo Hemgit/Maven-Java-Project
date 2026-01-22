@@ -123,7 +123,7 @@ stages:
         
                 
 
-          cd "$(REMOTE_DIR)" && mv *war student.war && 
+          cd "$(REMOTE_DIR)" && mv java*war student.war && 
           docker build -t "$(IMAGE):$(TAG)" -f Dockerfile .
 
       
