@@ -144,7 +144,7 @@ stages:
         runOptions: 'commands'
         commands: |
           set -e
-          WAR_FILE="$(ls $(REMOTE_DIR)/*.war | head -n1)"
+          WAR_FILE="$(ls $(REMOTE_DIR)/target/*.war | head -n1)"
           mv -f "$WAR_FILE" "$(REMOTE_DIR)/student.war"
 
           cd $(REMOTE_DIR)
