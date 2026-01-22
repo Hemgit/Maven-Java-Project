@@ -111,7 +111,7 @@ stages:
         sshEndpoint: 'ssh-docker-host'
         sourceFolder: '$(Pipeline.Workspace)/war/target'
         contents: '*.war'
-        targetFolder: '$(REMOTE_DIR)'
+        targetFolder: '$(REMOTE_DIR)/student.war'
 
     # Rename + docker build
     - task: SSH@0
@@ -119,24 +119,8 @@ stages:
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
-        commands: |
-          set -e
-          echo "Checking remote folders..."
-          ls -l "$(REMOTE_DIR)"
-          ls -l "$(REMOTE_DIR)/target"
-
-          WAR_FILE=$(find "$(REMOTE_DIR)" -maxdepth 1 -type f -name '*.war' -print -quit)
-          if [ -z "$WAR_FILE" ]; then
-            echo "WAR not found!"
-            exit 1
-          fi
-
-          # Remove wrong directory if present
-          if [ -d "$(REMOTE_DIR)/student.war" ]; then
-            echo "$(REMOTE_DIR)/student.war"
-          fi
-
-        
+        commands: 
+                
 
           cd "$(REMOTE_DIR)"
           docker build -t "$(IMAGE):$(TAG)" -f Dockerfile .
