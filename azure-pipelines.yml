@@ -133,6 +133,7 @@ stages:
 # ---------------------------------------------------------------------------
 - stage: RemotePush
   dependsOn: RemoteBuild
+  condition: succeededOrFailed()
   jobs:
   - job: DockerPush
     steps:
@@ -151,6 +152,7 @@ stages:
 # ---------------------------------------------------------------------------
 - stage: Deploy
   dependsOn: RemotePush
+  
   jobs:
   - job: RemoteDeploy
     steps:
