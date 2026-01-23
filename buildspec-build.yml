@@ -1,0 +1,30 @@
+
+version: 0.2
+
+env:
+  variables:
+    APP_NAME: "studentapp"
+    IMAGE: "hemgit/tomcat"
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto11
+  build:
+    commands:
+      - echo "=== Maven build/test/package ==="
+      - mvn -v
+      - mvn clean compile
+      - mvn test
+      - mvn package -DskipTests
+
+      # Create a stable tag to be reused across stages (one pipeline run = one tag)
+      - export TAG="$CODEBUILD_BUILD_NUMBER"
+      - echo "$TAG" > TAG.txt
+      - echo "TAG=$TAG"
+
+artifacts:
+  files:
+    - target/*.war
+    - Dockerfile
+    - TAG.txt
