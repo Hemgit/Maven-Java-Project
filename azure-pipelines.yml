@@ -31,14 +31,6 @@ stages:
     steps:
     - checkout: self
     
-    - task: JavaToolInstaller@0
-      displayName: 'Installs JDK 8 x64 and sets JAVA_HOME for subsequent steps'
-      inputs:
-        versionSpec: '8'
-        jdkArchitectureOption: 'x64'
-        jdkSourceOption: 'PreInstalled'
-        cleanDestinationDirectory: true
-
 
     - task: Maven@3
       displayName: 'mvn clean compile'
