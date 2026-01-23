@@ -1,0 +1,37 @@
+
+version: 0.2
+
+env:
+  variables:
+    IMAGE: "hemgit/tomcat"
+    APP_NAME: "studentapp"
+    PORT: "8080"
+    SSH_USER: "devops"
+    EC2_HOST: "1.2.3.4"
+
+  secrets-manager:
+    SSH_PRIVATE_KEY: "ssh/ec2/ci-key"
+
+phases:
+  install:
+    commands:
+      - yum install -y openssh-clients || apt-get update && apt-get install -y openssh-client
+  pre_build:
+    commands:
+      - mkdir -p ~/.ssh
+      - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+      - chmod 600 ~/.ssh/id_rsa
+      - ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+      - TAG=$(cat TAG.txt); export TAG; echo "TAG=$TAG"
+
+  build:
+    commands:
+      - |
+        ssh "$SSH_USER@$EC2_HOST" bash -c "'
+          set -e
+          docker ps -q --filter "name=$APP_NAME" | xargs -r docker stop
+          docker ps -a -q --filter "name=$APP_NAME" | xargs -r docker rm
+          docker pull $IMAGE:$TAG || true
+          docker run -d --name $APP_NAME --restart=always -p $PORT:8080 $IMAGE:$TAG
+          docker ps | grep $APP_NAME || (echo \"Container not running\" >&2; exit 1)
+        '"
