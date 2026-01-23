@@ -1,0 +1,52 @@
+
+version: 0.2
+
+env:
+  variables:
+    REMOTE_DIR: "/home/devops/webapp1"
+    IMAGE: "hemgit/tomcat"
+    SSH_USER: "devops"                # change if your SSH user differs
+    EC2_HOST: "1.2.3.4"               # set your EC2 public or private IP/DNS
+
+  secrets-manager:
+    SSH_PRIVATE_KEY: "ssh/ec2/ci-key"   # whole PEM private key text
+
+phases:
+  install:
+    commands:
+      - echo "=== Install ssh/scp clients ==="
+      - yum install -y openssh-clients || apt-get update && apt-get install -y openssh-client
+  pre_build:
+    commands:
+      - echo "=== Prepare SSH key and known_hosts ==="
+      - mkdir -p ~/.ssh
+      - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+      - chmod 600 ~/.ssh/id_rsa
+      # Avoid MITM: record host key (safer than StrictHostKeyChecking=no)
+      - ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+      - TAG=$(cat TAG.txt); export TAG; echo "TAG=$TAG"
+
+  build:
+    commands:
+      - echo "=== Copy artifacts to EC2: $EC2_HOST:$REMOTE_DIR ==="
+      - ssh "$SSH_USER@$EC2_HOST" "mkdir -p $REMOTE_DIR"
+      - scp Dockerfile "$SSH_USER@$EC2_HOST:$REMOTE_DIR/"
+      - scp target/*.war "$SSH_USER@$EC2_HOST:$REMOTE_DIR/"
+
+      - echo "=== Remote: rename WAR & docker build ==="
+      - |
+        ssh "$SSH_USER@$EC2_HOST" bash -c "'
+          set -e
+          cd $REMOTE_DIR
+          ls -l
+          WAR=\$(ls *.war | head -n 1)
+          if [ -z \"\$WAR\" ]; then
+            echo \"No WAR found\" >&2
+            exit 1
+          fi
+          mv \"\$WAR\" student.war
+          docker build -t $IMAGE:$TAG -f Dockerfile .
+        '"
+artifacts:
+  files:
+    - TAG.txt
