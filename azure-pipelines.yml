@@ -142,6 +142,7 @@ stages:
       inputs:
         sshEndpoint: 'ssh-docker-host'
         runOptions: 'commands'
+        failOnStdErr: false
         commands: |
           
             echo "$(dockerhub.password)" | docker login -u "$(dockerhub.user)" --password-stdin 2> >(grep -v 'stored unencrypted' >&2)
