@@ -152,7 +152,7 @@ stages:
 # ---------------------------------------------------------------------------
 - stage: Deploy
   dependsOn: RemotePush
-  
+  condition: succeededOrFailed()
   jobs:
   - job: RemoteDeploy
     steps:
